@@ -1,0 +1,6 @@
+[submodule "stdsimd"]
+        path = stdsimd
+        url = github:rust-lang-nursery/stdsimd
+[submodule "vektor"]
+        path = vektor
+        url = github:AdamNiederer/vektor
