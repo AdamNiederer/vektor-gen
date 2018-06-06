@@ -1,30 +1,43 @@
 import os
 import re
 
-fn_re = re.compile(
-    "#\\[target_feature\\(enable\s*=\s*\"([A-Za-z0-9_,.]*)\"\\)\\]\s*" # feature
-    + "(?:(?:#\\[[\s\S]*?\\]\s*)|(?://.*?\n\s*))*" # more declarations or comments
-    #\s*(?:(?://.*)|(?:#\\[.*\\])\n)*"
-    + "pub (?:unsafe)? fn ([a-zA-z0-9_]*)\s*" # decl + name
-    + "\s*\\(([^)]*?)\\)\s*" # args
-    + "\s*->\s*([a-zA-z0-9_]*)\s*{", # return type
+find_re  = re.compile(
+    ""
+    + r"((?:(?:#\[[^]]*?\]\s*\n+)|(?:[\t ]*//[^!].*?\s*\n+))+)" # toplevel declarations or comments
+    # + "(#\[rustc_args_required_const\([0-9]+\)\])?\s*" # consts
+    # + "((?:(?:#\[[\s\S]*?\]\s*)|(?://.*?\n\s*)))*" # more declarations or comments
+    + r"(pub (?:unsafe)? fn (?:[a-zA-z0-9_]*)\s*" # decl + name
+    + r"\s*\((?:[^)]*?)\)\s*" # args
+    + r"\s*->\s*(?:[a-zA-z0-9_]*)\s*{)", # return type
     flags=re.MULTILINE)
+
+fn_re = re.compile(
+    ""
+    + r"pub (?:unsafe)? fn ([a-zA-z0-9_]*)\s*" # decl + name
+    + r"\s*\(([^)]*?)\)\s*" # args
+    + r"\s*->\s*([a-zA-z0-9_]*)\s*{", # return type
+    flags=re.MULTILINE)
+
+const_re = re.compile("#\[rustc_args_required_const\(\s*([0-9]+)\s*\)\]")
 
 for arch in ["x86", "x86_64"]:
     if not os.path.exists(os.getcwd() + f"/vektor/src/{arch}"):
         os.makedirs(os.getcwd() + f"/vektor/src/{arch}")
     for entry in os.scandir(os.getcwd() + f"/stdsimd/coresimd/{arch}"):
-        if entry.name == "mod.rs":
+        if entry.name in ["mod.rs", "test.rs", "sha.rs"]:
             continue
         with open(os.getcwd() + f"/vektor/src/{arch}/{entry.name}", "w") as outfile:
             with open(entry.path) as infile:
 
-                outfile.write(f"use ::arch::{arch}::*;\n")
-                outfile.write(f"use ::simd::*;\n\n")
+                outfile.write(f"#![allow(unused_imports)]\n")
+                outfile.write(f"use crate::myarch::*;\n")
+                outfile.write(f"use crate::simd::*;\n\n")
 
                 file_str = infile.read()
 
-                for feature, name, args, ret in map(lambda m: m.groups(), re.finditer(fn_re, file_str)):
+                for decls, fnline in map(lambda m: m.groups(), re.finditer(find_re, file_str)):
+                    name, args, ret = next(map(lambda m: m.groups(), re.finditer(fn_re, fnline)))
+
                     int_map = [("epi64", "i64x2", "i64x4"),
                                ("epu64", "u64x2", "u64x4"),
                                ("epi32", "i32x4", "i32x8"),
@@ -94,8 +107,12 @@ for arch in ["x86", "x86_64"]:
 
                         processed_args.append((argname, argtype))
 
-                    outfile.write(f"#[inline]\n")
-                    outfile.write(f"#[target_feature(enable = \"{feature}\")]\n")
+                    outfile.write(decls)
+
+                    constindices = {}
+                    if "rustc_args_required_const" in decls:
+                        constindices = {int(m.groups()[0]) for m in re.finditer(const_re, decls)}
+
                     outfile.write(f"pub unsafe fn {name}(")
 
                     for argname, argtype in processed_args[:-1]:
@@ -105,5 +122,29 @@ for arch in ["x86", "x86_64"]:
                         outfile.write(f"{processed_args[-1][0]}: {processed_args[-1][1]}")
 
                     outfile.write(f") -> {ret} {{\n")
-                    outfile.write(f"    ::mem::transmute(::arch::{arch}::{name}({', '.join(f'::mem::transmute({argname})' for argname, _ in processed_args)}))\n")
+
+                    if constindices:
+                        arglist = [argname
+                                   if i not in constindices
+                                   else "$imm8"
+                                   for i, (argname, _) in enumerate(processed_args)]
+                        formattedargs = ", ".join(f"::mem::transmute({argname})"
+                                                  if argname != "$imm8"
+                                                  else argname
+                                                  for argname in arglist)
+
+                        # TODO: >1 const argument
+                        const_arg = processed_args[list(constindices)[0]][0]
+
+                        outfile.write(f"""
+    macro_rules! call {{
+        ($imm8:expr) => {{
+            ::myarch::{name}({formattedargs})
+        }};
+    }}
+
+   ::mem::transmute(constify_imm8!({const_arg}, call))
+""")
+                    else:
+                        outfile.write(f"    ::mem::transmute(::myarch::{name}({', '.join(f'::mem::transmute({argname})' if argname != 'imm8' else argname for argname, _ in processed_args)}))\n")
                     outfile.write(f"}}\n\n")
