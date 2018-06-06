@@ -92,8 +92,20 @@ for arch in ["x86", "x86_64"]:
 
                         for k, v in double_map.items():
                             ret = ret.replace(k, v)
+                            argtype = argtype.replace(k, v)
 
                         for k, v in float_map.items():
+                            ret = (ret
+                                   .replace("__m128d", "__VEKTOR_GEN_M128D")
+                                   .replace("__m128i", "__VEKTOR_GEN_M128I")
+                                   .replace("__m256d", "__VEKTOR_GEN_M256D")
+                                   .replace("__m256i", "__VEKTOR_GEN_M256I")
+                                   .replace(k, v)
+                                   .replace("__VEKTOR_GEN_M128D", "__m128d")
+                                   .replace("__VEKTOR_GEN_M128I", "__m128i")
+                                   .replace("__VEKTOR_GEN_M256D", "__m256d")
+                                   .replace("__VEKTOR_GEN_M256I", "__m256i"))
+
                             argtype = (argtype
                                        .replace("__m128d", "__VEKTOR_GEN_M128D")
                                        .replace("__m128i", "__VEKTOR_GEN_M128I")
