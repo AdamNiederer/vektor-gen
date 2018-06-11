@@ -18,6 +18,9 @@ fn_re = re.compile(
     + r"\s*->\s*([a-zA-z0-9_]*)\s*{", # return type
     flags=re.MULTILINE)
 
+cvt_re = re.compile(
+    "_mm(?:256)?_cvt(ep[iu][1368][246]?)_(ep[iu][1368][246]?)")
+
 const_re = re.compile("#\[rustc_args_required_const\(\s*([0-9]+)\s*\)\]")
 
 for arch in ["x86", "x86_64"]:
@@ -83,7 +86,13 @@ for arch in ["x86", "x86_64"]:
                         argname = argname.strip()
                         argtype = argtype.strip()
                         for suffix, sse, avx in int_map:
-                            if name.endswith(suffix) and "gather" not in name:
+                            if bool(list(map(lambda m: m.groups(), re.finditer(cvt_re, name)))):
+                                argsuffix, retsuffix = next(map(lambda m: m.groups(), re.finditer(cvt_re, name)))
+                                if argsuffix == suffix:
+                                    argtype = sse
+                                if retsuffix == suffix:
+                                    ret = avx if "256" in name else sse
+                            elif name.endswith(suffix) and "gather" not in name:
                                 if argname in ["a", "b", "c", "d", "mask", "x", "y", "z"]:
                                     argtype = argtype.replace("__m128i", sse)
                                     argtype = argtype.replace("__m256i", avx)
