@@ -44,7 +44,7 @@ for arch in ["x86", "x86_64"]:
                                ("epu32", "u32x4", "u32x8"),
                                ("epi16", "i16x8", "i16x16"),
                                ("epu16", "u16x8", "u16x16"),
-                               ("epi8", "u8x16", "i8x32"),
+                               ("epi8", "i8x16", "i8x32"),
                                ("epu8", "u8x16", "u8x32")]
 
                     double_map = {
@@ -89,6 +89,9 @@ for arch in ["x86", "x86_64"]:
                                     argtype = argtype.replace("__m256i", avx)
                                     ret = ret.replace("__m128i", sse)
                                     ret = ret.replace("__m256i", avx)
+
+                                if "_abs_" in name:
+                                    ret = ret.replace("i", "u")
 
                         for k, v in double_map.items():
                             ret = ret.replace(k, v)
