@@ -107,9 +107,6 @@ def replace_default(fn, args, ret):
     sub_many = lambda string: lambda acc, it: re.sub(f"{it[0]}$", it[1], acc or string)
     master_map = int_map | double_map | float_map
 
-    if "hsub" in fn:
-        print("hi", fn)
-
     return ([[arg[0], reduce(sub_many(arg[1]), master_map.items(), "")] for arg in args],
             reduce(sub_many(ret), master_map.items(), ""))
 
@@ -122,7 +119,7 @@ def body_string(decls, fn, args):
         constified = (name if i not in constindices else "$imm8"
                       for i, (name, _) in enumerate(args))
 
-        formatted = ", ".join(f"::mem::transmute({name})" if name != "$imm8" else name
+        formatted = ", ".join(f"crate::mem::transmute({name})" if name != "$imm8" else name
                               for name in constified)
 
         # TODO: >1 const argument
@@ -132,13 +129,13 @@ def body_string(decls, fn, args):
         return f"""
     macro_rules! call {{
         ($imm8:expr) => {{
-            ::myarch::{fn}({formatted})
+            crate::myarch::{fn}({formatted})
         }};
     }}
 
-    ::mem::transmute(constify_imm8!({const_arg}, call))\n"""
+    crate::mem::transmute(constify_imm8!({const_arg}, call))\n"""
     else:
-        return f"    ::mem::transmute(::myarch::{fn}({', '.join(f'::mem::transmute({argname})' if argname != 'imm8' else argname for argname, _ in args)}))\n"
+        return f"    crate::mem::transmute(crate::myarch::{fn}({', '.join(f'crate::mem::transmute({argname})' if argname != 'imm8' else argname for argname, _ in args)}))\n"
 
 def transformations(fn):
     all_transformations = {
@@ -194,7 +191,7 @@ if True or __name__ == "__main__":
             os.makedirs(cwd + f"/vektor/src/{arch}")
 
         files_to_scan = (f for f in os.scandir(cwd + f"/stdsimd/coresimd/{arch}")
-                         if f.name not in ["mod.rs", "test.rs", "sha.rs"])
+                         if f.name not in ["mod.rs"])
 
         for entry in files_to_scan:
             with open(entry.path) as infile:
