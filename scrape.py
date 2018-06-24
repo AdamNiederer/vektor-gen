@@ -1,5 +1,9 @@
 import os
 import re
+from functools import reduce
+from setdict import SetDict
+
+const_re = re.compile("#\[rustc_args_required_const\(\s*([0-9]+)\s*\)\]")
 
 find_re  = re.compile(
     ""
@@ -18,157 +22,181 @@ fn_re = re.compile(
     + r"\s*->\s*([a-zA-z0-9_]*)\s*{", # return type
     flags=re.MULTILINE)
 
-cvt_re = re.compile(
-    "_mm(?:256)?_cvt(ep[iu][1368][246]?)_(ep[iu][1368][246]?)")
+type_re = re.compile("(?:[sp][sd]|e?[sp][iu][0-9]{1,2})")
+int_re = re.compile("e?[sp][iu][0-9]{1,2}")
+cvt_re = re.compile("_mm(?:256)?_cvt(e?p[sdiu][0-9]{1,2})_(e?p[sdiu][0-9]{1,2})")
+pack_re = re.compile("_mm(?:256)?_packu?s_(e?p[sdiu][0-9]{1,2})")
+abs_re = re.compile("_mm(?:256)?_abs_(e?p[sdiu][0-9]{1,2})")
 
-const_re = re.compile("#\[rustc_args_required_const\(\s*([0-9]+)\s*\)\]")
+int_maps = {
+    "epi64": SetDict({"__m128i": "i64x2", "__m256i": "i64x4"}),
+    "epu64": SetDict({"__m128i": "u64x2", "__m256i": "u64x4"}),
+    "epi32": SetDict({"__m128i": "i32x4", "__m256i": "i32x8"}),
+    "epu32": SetDict({"__m128i": "u32x4", "__m256i": "u32x8"}),
+    "epi16": SetDict({"__m128i": "i16x8", "__m256i": "i16x16"}),
+    "epu16": SetDict({"__m128i": "u16x8", "__m256i": "u16x16"}),
+    "epi8": SetDict({"__m128i": "i8x16", "__m256i": "i8x32"}),
+    "epu8": SetDict({"__m128i": "u8x16", "__m256i": "u8x32"})
+}
 
-for arch in ["x86", "x86_64"]:
-    if not os.path.exists(os.getcwd() + f"/vektor/src/{arch}"):
-        os.makedirs(os.getcwd() + f"/vektor/src/{arch}")
-    for entry in os.scandir(os.getcwd() + f"/stdsimd/coresimd/{arch}"):
-        if entry.name in ["mod.rs", "test.rs", "sha.rs"]:
-            continue
-        with open(os.getcwd() + f"/vektor/src/{arch}/{entry.name}", "w") as outfile:
-            with open(entry.path) as infile:
+double_map = SetDict({
+    "__m128d": "f64x2",
+    "__m256d": "f64x4"
+})
 
-                outfile.write(f"#![allow(unused_imports)]\n")
-                outfile.write(f"use crate::myarch::*;\n")
-                outfile.write(f"use crate::simd::*;\n\n")
+float_map = SetDict({ # Intel could've made it easy on us...
+    "__m256": "f32x8",
+    "__m128": "f32x4"
+})
 
-                file_str = infile.read()
+def replace_pack(fn, args, ret):
+    ret_maps = {
+        "epi64": SetDict({"__m128i": "u32x4", "__m256i": "u32x8"}),
+        "epu64": SetDict({"__m128i": "u32x4", "__m256i": "u32x8"}),
+        "epi32": SetDict({"__m128i": "u16x8", "__m256i": "u16x16"}),
+        "epu32": SetDict({"__m128i": "u16x8", "__m256i": "u16x16"}),
+        "epi16": SetDict({"__m128i": "u8x16", "__m256i": "u8x32"}),
+        "epu16": SetDict({"__m128i": "u8x16", "__m256i": "u8x32"})
+    }
 
-                for decls, fnline in map(lambda m: m.groups(), re.finditer(find_re, file_str)):
-                    name, args, ret = next(map(lambda m: m.groups(), re.finditer(fn_re, fnline)))
+    suffix = next(type_re.finditer(fn)).group()
+    arg_map = int_maps.get(suffix, SetDict())
+    ret_map = ret_maps.get(suffix, SetDict())
 
-                    int_map = [("epi64", "i64x2", "i64x4"),
-                               ("epu64", "u64x2", "u64x4"),
-                               ("epi32", "i32x4", "i32x8"),
-                               ("epu32", "u32x4", "u32x8"),
-                               ("epi16", "i16x8", "i16x16"),
-                               ("epu16", "u16x8", "u16x16"),
-                               ("epi8", "i8x16", "i8x32"),
-                               ("epu8", "u8x16", "u8x32")]
+    sub_many = lambda string: lambda acc, it: re.sub(f"{it[0]}$", it[1], acc or string)
+    master_map = arg_map | double_map | float_map
 
-                    double_map = {
-                        "__m128d": "f64x2",
-                        "__m256d": "f64x4"
-                    }
+    return ([[arg[0], reduce(sub_many(arg[1]), master_map.items(), "")] for arg in args],
+            reduce(sub_many(ret), (ret_map | double_map | float_map).items(), ""))
 
-                    float_map = { # Intel could've made it easy on us...
-                        "__m256": "f32x8",
-                        "__m128": "f32x4"
-                    }
+def replace_abs(fn, args, ret):
+    ret_maps = {
+        "epi64": SetDict({"__m128i": "u64x2", "__m256i": "u64x4"}),
+        "epu64": SetDict({"__m128i": "u64x2", "__m256i": "u64x4"}),
+        "epi32": SetDict({"__m128i": "u32x4", "__m256i": "u32x8"}),
+        "epu32": SetDict({"__m128i": "u32x4", "__m256i": "u32x8"}),
+        "epi16": SetDict({"__m128i": "u16x8", "__m256i": "u16x16"}),
+        "epu16": SetDict({"__m128i": "u16x8", "__m256i": "u16x16"}),
+        "epi8": SetDict({"__m128i": "u8x16", "__m256i": "u8x32"}),
+        "epu8": SetDict({"__m128i": "u8x16", "__m256i": "u8x32"})
+    }
 
-                    for suffix, sse, avx in int_map:
-                        if name.endswith(suffix):
-                            ret = ret.replace("__m128i", sse)
-                            ret = ret.replace("__m256i", avx)
+    suffix = next(type_re.finditer(fn)).group()
+    int_map = int_maps.get(suffix, SetDict())
+    ret_map = ret_maps.get(suffix, SetDict())
 
-                    for k, v in double_map.items():
-                        ret = ret.replace(k, v)
+    sub_many = lambda string: lambda acc, it: re.sub(f"{it[0]}$", it[1], acc or string)
+    master_map = int_map | double_map | float_map
+    return ([[arg[0], reduce(sub_many(arg[1]), master_map.items(), "")] for arg in args],
+            reduce(sub_many(ret), (ret_map | double_map | float_map).items(), ""))
 
-                    for k, v in float_map.items():
-                        ret = (ret
-                               .replace("__m128d", "__VEKTOR_GEN_M128D")
-                               .replace("__m128i", "__VEKTOR_GEN_M128I")
-                               .replace("__m256d", "__VEKTOR_GEN_M256D")
-                               .replace("__m256i", "__VEKTOR_GEN_M256I")
-                               .replace(k, v)
-                               .replace("__VEKTOR_GEN_M128D", "__m128d")
-                               .replace("__VEKTOR_GEN_M128I", "__m128i")
-                               .replace("__VEKTOR_GEN_M256D", "__m256d")
-                               .replace("__VEKTOR_GEN_M256I", "__m256i"))
+def replace_cvt(fn, args, ret):
+    from_, to = next(cvt_re.finditer(fn)).groups()
 
-                    processed_args = []
-                    splitargs = filter(lambda a: a.strip() != "", args.split(",") if args != "" else [])
-                    for argname, argtype in map(lambda a: a.split(":"), splitargs):
-                        argname = argname.strip()
-                        argtype = argtype.strip()
-                        for suffix, sse, avx in int_map:
-                            if bool(list(map(lambda m: m.groups(), re.finditer(cvt_re, name)))):
-                                argsuffix, retsuffix = next(map(lambda m: m.groups(), re.finditer(cvt_re, name)))
-                                if argsuffix == suffix:
-                                    argtype = sse
-                                if retsuffix == suffix:
-                                    ret = avx if "256" in name else sse
-                            elif name.endswith(suffix) and "gather" not in name:
-                                if argname in ["a", "b", "c", "d", "mask", "x", "y", "z"]:
-                                    argtype = argtype.replace("__m128i", sse)
-                                    argtype = argtype.replace("__m256i", avx)
-                                    ret = ret.replace("__m128i", sse)
-                                    ret = ret.replace("__m256i", avx)
+    arg_map = int_maps.get(from_, SetDict())
+    ret_map = int_maps.get(to, SetDict())
 
-                                if "_abs_" in name:
-                                    ret = ret.replace("i", "u")
+    sub_many = lambda string: lambda acc, it: re.sub(f"{it[0]}$", it[1], acc or string)
+    master_map = arg_map | double_map | float_map
 
-                        for k, v in double_map.items():
-                            ret = ret.replace(k, v)
-                            argtype = argtype.replace(k, v)
+    return ([[arg[0], reduce(sub_many(arg[1]), master_map.items(), "")] for arg in args],
+            reduce(sub_many(ret), (ret_map | double_map | float_map).items(), ""))
 
-                        for k, v in float_map.items():
-                            ret = (ret
-                                   .replace("__m128d", "__VEKTOR_GEN_M128D")
-                                   .replace("__m128i", "__VEKTOR_GEN_M128I")
-                                   .replace("__m256d", "__VEKTOR_GEN_M256D")
-                                   .replace("__m256i", "__VEKTOR_GEN_M256I")
-                                   .replace(k, v)
-                                   .replace("__VEKTOR_GEN_M128D", "__m128d")
-                                   .replace("__VEKTOR_GEN_M128I", "__m128i")
-                                   .replace("__VEKTOR_GEN_M256D", "__m256d")
-                                   .replace("__VEKTOR_GEN_M256I", "__m256i"))
+def replace_default(fn, args, ret):
+    int_map = int_maps.get(next(int_re.finditer(fn)).group(), SetDict()) if int_re.search(fn) else {}
+    sub_many = lambda string: lambda acc, it: re.sub(f"{it[0]}$", it[1], acc or string)
+    master_map = int_map | double_map | float_map
 
-                            argtype = (argtype
-                                       .replace("__m128d", "__VEKTOR_GEN_M128D")
-                                       .replace("__m128i", "__VEKTOR_GEN_M128I")
-                                       .replace("__m256d", "__VEKTOR_GEN_M256D")
-                                       .replace("__m256i", "__VEKTOR_GEN_M256I")
-                                       .replace(k, v)
-                                       .replace("__VEKTOR_GEN_M128D", "__m128d")
-                                       .replace("__VEKTOR_GEN_M128I", "__m128i")
-                                       .replace("__VEKTOR_GEN_M256D", "__m256d")
-                                       .replace("__VEKTOR_GEN_M256I", "__m256i"))
+    if "hsub" in fn:
+        print("hi", fn)
 
-                        processed_args.append((argname, argtype))
+    return ([[arg[0], reduce(sub_many(arg[1]), master_map.items(), "")] for arg in args],
+            reduce(sub_many(ret), master_map.items(), ""))
 
-                    outfile.write(decls)
+def body_string(decls, fn, args):
+    constindices = ({int(m.groups()[0]) for m in re.finditer(const_re, decls)}
+                    if "rustc_args_required_const" in decls
+                    else set())
 
-                    constindices = {}
-                    if "rustc_args_required_const" in decls:
-                        constindices = {int(m.groups()[0]) for m in re.finditer(const_re, decls)}
+    if constindices:
+        constified = (name if i not in constindices else "$imm8"
+                      for i, (name, _) in enumerate(args))
 
-                    outfile.write(f"pub unsafe fn {name}(")
+        formatted = ", ".join(f"::mem::transmute({name})" if name != "$imm8" else name
+                              for name in constified)
 
-                    for argname, argtype in processed_args[:-1]:
-                        outfile.write(f"{argname}: {argtype}, ")
+        # TODO: >1 const argument
+        const_arg = args[list(constindices)[0]][0]
 
-                    if processed_args != []:
-                        outfile.write(f"{processed_args[-1][0]}: {processed_args[-1][1]}")
-
-                    outfile.write(f") -> {ret} {{\n")
-
-                    if constindices:
-                        arglist = [argname
-                                   if i not in constindices
-                                   else "$imm8"
-                                   for i, (argname, _) in enumerate(processed_args)]
-                        formattedargs = ", ".join(f"::mem::transmute({argname})"
-                                                  if argname != "$imm8"
-                                                  else argname
-                                                  for argname in arglist)
-
-                        # TODO: >1 const argument
-                        const_arg = processed_args[list(constindices)[0]][0]
-
-                        outfile.write(f"""
+        # Call site to be passed to constify_imm8
+        return f"""
     macro_rules! call {{
         ($imm8:expr) => {{
-            ::myarch::{name}({formattedargs})
+            ::myarch::{fn}({formatted})
         }};
     }}
 
-   ::mem::transmute(constify_imm8!({const_arg}, call))
-""")
-                    else:
-                        outfile.write(f"    ::mem::transmute(::myarch::{name}({', '.join(f'::mem::transmute({argname})' if argname != 'imm8' else argname for argname, _ in processed_args)}))\n")
-                    outfile.write(f"}}\n\n")
+    ::mem::transmute(constify_imm8!({const_arg}, call))\n"""
+    else:
+        return f"    ::mem::transmute(::myarch::{fn}({', '.join(f'::mem::transmute({argname})' if argname != 'imm8' else argname for argname, _ in args)}))\n"
+
+def transformations(fn):
+    all_transformations = {
+        cvt_re: replace_cvt,
+        pack_re: replace_pack,
+        abs_re: replace_abs
+    }
+
+    for re_, transformation in all_transformations.items():
+        if re_.match(fn):
+            return transformation
+
+    return replace_default
+
+def transform_file(infile, outfile):
+    outfile.write(f"#![allow(unused_imports)]\n")
+    outfile.write(f"use crate::myarch::*;\n")
+    outfile.write(f"use crate::simd::*;\n\n")
+
+    file_str = infile.read()
+
+    for decls, fnline in map(lambda m: m.groups(), re.finditer(find_re, file_str)):
+        fn, args, ret = next(map(lambda m: m.groups(), re.finditer(fn_re, fnline)))
+
+        args = [[s.strip() for s in name_type.split(":") if s.strip() != ""]
+                for name_type in args.split(",")
+                if args != "" and name_type != ""
+                if [s.strip() for s in name_type.split(":") if s.strip() != ""]]
+
+        args, ret = transformations(fn)(fn, args, ret)
+
+        # Write the header
+        outfile.write(decls)
+        outfile.write(f"pub unsafe fn {fn}(")
+
+        for name, type_ in args[:-1]:
+            outfile.write(f"{name}: {type_}, ")
+
+        if args != []:
+            outfile.write(f"{args[-1][0]}: {args[-1][1]}")
+
+        outfile.write(f") -> {ret} {{\n")
+
+        # Write the body
+        outfile.write(body_string(decls, fn, args))
+        outfile.write(f"}}\n\n")
+
+if True or __name__ == "__main__":
+    for arch in ["x86", "x86_64"]:
+        cwd = os.getcwd()
+
+        if not os.path.exists(cwd + f"/vektor/src/{arch}"):
+            os.makedirs(cwd + f"/vektor/src/{arch}")
+
+        files_to_scan = (f for f in os.scandir(cwd + f"/stdsimd/coresimd/{arch}")
+                         if f.name not in ["mod.rs", "test.rs", "sha.rs"])
+
+        for entry in files_to_scan:
+            with open(entry.path) as infile:
+                with open(cwd + f"/vektor/src/{arch}/{entry.name}", "w") as outfile:
+                    transform_file(infile, outfile)
