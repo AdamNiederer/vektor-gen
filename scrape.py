@@ -51,11 +51,11 @@ float_map = SetDict({ # Intel could've made it easy on us...
 
 def replace_pack(fn, args, ret):
     ret_maps = {
-        "epi64": SetDict({"__m128i": "u32x4", "__m256i": "u32x8"}),
+        "epi64": SetDict({"__m128i": "u32x4", "__m256i": "i32x8"}),
         "epu64": SetDict({"__m128i": "u32x4", "__m256i": "u32x8"}),
-        "epi32": SetDict({"__m128i": "u16x8", "__m256i": "u16x16"}),
+        "epi32": SetDict({"__m128i": "u16x8", "__m256i": "i16x16"}),
         "epu32": SetDict({"__m128i": "u16x8", "__m256i": "u16x16"}),
-        "epi16": SetDict({"__m128i": "u8x16", "__m256i": "u8x32"}),
+        "epi16": SetDict({"__m128i": "u8x16", "__m256i": "i8x32"}),
         "epu16": SetDict({"__m128i": "u8x16", "__m256i": "u8x32"})
     }
 
