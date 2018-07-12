@@ -7,7 +7,7 @@ const_re = re.compile("#\[rustc_args_required_const\(\s*([0-9]+)\s*\)\]")
 
 find_re  = re.compile(
     ""
-    + r"((?:(?:#\[[^]]*?\]\s*\n+)|(?:[\t ]*//[^!].*?\s*\n+))+)" # toplevel declarations or comments
+    + r"((?:(?:#\[[^]]*?\]\s*(?://.*)?\n+)|(?:[\t ]*//[^!].*?\s*\n+))+)" # toplevel declarations or comments
     # + "(#\[rustc_args_required_const\([0-9]+\)\])?\s*" # consts
     # + "((?:(?:#\[[\s\S]*?\]\s*)|(?://.*?\n\s*)))*" # more declarations or comments
     + r"(pub (?:unsafe)? fn (?:[a-zA-z0-9_]*)\s*" # decl + name
