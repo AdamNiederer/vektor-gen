@@ -188,11 +188,9 @@ def transform_file(infile, outfile):
 
 
 if True or __name__ == "__main__":
-    
     cwd = os.getcwd()
 
     for arch in ["x86", "x86_64", "aarch64", "arm", "mips", "nvptx"]: 
-
         source_path = cwd + f"/stdsimd/coresimd/{arch}"
         target_path = cwd + f"/vektor/src/{arch}"
 
