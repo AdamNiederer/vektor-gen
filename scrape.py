@@ -185,17 +185,24 @@ def transform_file(infile, outfile):
         outfile.write(body_string(decls, fn, args))
         outfile.write(f"}}\n\n")
 
+
+
 if True or __name__ == "__main__":
-    for arch in ["x86", "x86_64"]:
-        cwd = os.getcwd()
+    
+    cwd = os.getcwd()
 
-        if not os.path.exists(cwd + f"/vektor/src/{arch}"):
-            os.makedirs(cwd + f"/vektor/src/{arch}")
+    for arch in ["x86", "x86_64", "aarch64", "arm", "mips", "nvptx"]: 
 
-        files_to_scan = (f for f in os.scandir(cwd + f"/stdsimd/coresimd/{arch}")
+        source_path = cwd + f"/stdsimd/coresimd/{arch}"
+        target_path = cwd + f"/vektor/src/{arch}"
+
+        if not os.path.exists(target_path):
+            os.makedirs(target_path)
+
+        files_to_scan = (f for f in os.scandir(source_path)
                          if f.name not in ["mod.rs"])
 
         for entry in files_to_scan:
             with open(entry.path) as infile:
-                with open(cwd + f"/vektor/src/{arch}/{entry.name}", "w") as outfile:
+                with open(f"{target_path}/{entry.name}", "w") as outfile:
                     transform_file(infile, outfile)
